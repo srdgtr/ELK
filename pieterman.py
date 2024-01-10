@@ -136,7 +136,7 @@ with open(latest_file, "rb") as f:
         f.read(), "/macro/datafiles/ELK/" + latest_file.name, mode=dropbox.files.WriteMode("overwrite", None), mute=True
     )
 
-elk_voorraad_info_basis[['sku', 'price']].rename(columns={'price': 'Inkoopprijs exclusief'}).to_csv("ALR_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
+elk_voorraad_info_basis[['sku', 'price']].rename(columns={'price': 'Inkoopprijs exclusief'}).to_csv("ELK_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
 
 # elk_info_db = elk_info[
 #     [
