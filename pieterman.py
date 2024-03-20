@@ -13,18 +13,26 @@ from sqlalchemy.engine.url import URL
 
 sys.path.insert(0, str(Path.home()))
 from bol_export_file import get_file
+from import_data import insert_data, engine
 
-dbx = dropbox.Dropbox(os.environ.get("DROPBOX"))
+dropbox_key = os.environ.get('DROPBOX')
+if not dropbox_key:
+     config = configparser.ConfigParser()
+     config.read(Path.home() / "bol_export_files.ini")
+     dropbox_key = config.get("dropbox", "api_dropbox")
+     
+dbx = dropbox.Dropbox(dropbox_key)
+
 ini_config = configparser.ConfigParser(interpolation=None)
 ini_config.read(Path.home() / "bol_export_files.ini")
 config_db = dict(
-    drivername="mariadb",
-    username=ini_config.get("database leveranciers", "user"),
-    password=ini_config.get("database leveranciers", "password"),
-    host=ini_config.get("database leveranciers", "host"),
-    port=ini_config.get("database leveranciers", "port"),
-    database=ini_config.get("database leveranciers", "database"),
-)
+        drivername="mariadb",
+        username=ini_config.get("database odin", "user"),
+        password=ini_config.get("database odin", "password"),
+        host=ini_config.get("database odin", "host"),
+        port=ini_config.get("database odin", "port"),
+        database=ini_config.get("database odin", "database"),
+    )
 engine = create_engine(URL.create(**config_db))
 current_folder = Path.cwd().name.upper()
 korting_percent = int(ini_config.get("stap 1 vaste korting", current_folder.lower()).strip("%"))
@@ -68,8 +76,8 @@ elk_voorraad_info = (
         eigen_sku=lambda x: "ELK" + x["sku"],
         eigenschappen=(
             lambda x: x["eigenschappen"]
-            .str.replace("\[vrij\] ", "", regex=True)
-            .str.replace("\[vrij\]", "", regex=True)
+            .str.replace(r"\[vrij\] ", "", regex=True)
+            .str.replace(r"\[vrij\]", "", regex=True)
             .str.replace("<br>", "", regex=True)
             .str.replace("&nbsp;", "", regex=True)
             .str.encode("ascii", "ignore")
@@ -138,39 +146,17 @@ with open(latest_file, "rb") as f:
 
 elk_voorraad_info_basis[['sku', 'price']].rename(columns={'price': 'Inkoopprijs exclusief'}).to_csv("ELK_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
 
-# elk_info_db = elk_info[
-#     [
-#         "eigen_sku",
-#         "sku",
-#         "ean",
-#         "voorraad",
-#         "merk",
-#         "prijs",
-#         "advies_prijs",
-#         "category",
-#         "gewicht",
-#         "url_plaatje",
-#         "url_artikel",
-#         "product_title",
-#         "lange_omschrijving",
-#         "verpakings_eenheid",
-#         "lk",
-#     ]
-# ]
+product_info = elk_voorraad_info_basis.rename(
+    columns={
+        "sku":"onze_sku",
+        # "ean":"ean",
+        "brand":"merk",
+        "stock":"voorraad",
+        "price":"inkoop_prijs",
+        # :"promo_inkoop_prijs",
+        # :"promo_inkoop_actief",
+        "price_advice":"advies_prijs",
+        "info":"omschrijving",
+}).assign(import_date = datetime.now())
 
-# current_folder = Path.cwd().name.upper()
-# huidige_datum = datetime.now().strftime("%d_%b_%Y")
-# elk_info_db.to_sql(f"{current_folder}_dag_{huidige_datum}", con=engine, if_exists="replace", index=False, chunksize=1000)
-
-# with engine.connect() as con:
-#     con.execute(f"ALTER TABLE {current_folder}_dag_{huidige_datum} ADD PRIMARY KEY (eigen_sku(20))")
-#     aantal_items = con.execute(f"SELECT count(*) FROM {current_folder}_dag_{huidige_datum}").fetchall()[-1][-1]
-#     totaal_stock = int(con.execute(f"SELECT sum(voorraad) FROM {current_folder}_dag_{huidige_datum}").fetchall()[-1][-1])
-#     totaal_prijs = int(con.execute(f"SELECT sum(prijs) FROM {current_folder}_dag_{huidige_datum}").fetchall()[-1][-1])
-#     leverancier = f"{current_folder}"
-#     sql_insert = (
-#         "INSERT INTO process_import_log (aantal_items, totaal_stock, totaal_prijs, leverancier) VALUES (%s,%s,%s,%s)"
-#     )
-#     con.execute(sql_insert, (aantal_items, totaal_stock, totaal_prijs, leverancier))
-
-# engine.dispose()
+insert_data(engine, product_info)
