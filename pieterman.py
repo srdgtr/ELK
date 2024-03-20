@@ -11,9 +11,9 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import URL
 
-sys.path.insert(0, str(Path.home()))
+sys.path.insert(0, str(Path.cwd().parent))
 from bol_export_file import get_file
-from import_data import insert_data, engine
+from import_leveranciers.import_data import insert_data, engine
 
 dropbox_key = os.environ.get('DROPBOX')
 if not dropbox_key:
