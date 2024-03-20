@@ -15,29 +15,27 @@ sys.path.insert(0, str(Path.cwd().parent))
 from bol_export_file import get_file
 from import_leveranciers.import_data import insert_data, engine
 
-dropbox_key = os.environ.get('DROPBOX')
-if not dropbox_key:
-     config = configparser.ConfigParser()
-     config.read(Path.home() / "bol_export_files.ini")
-     dropbox_key = config.get("dropbox", "api_dropbox")
-     
-dbx = dropbox.Dropbox(dropbox_key)
-
 ini_config = configparser.ConfigParser(interpolation=None)
 ini_config.read(Path.home() / "bol_export_files.ini")
+dropbox_key = os.environ.get("DROPBOX")
+if not dropbox_key:
+    dropbox_key = ini_config.get("dropbox", "api_dropbox")
+
+dbx = dropbox.Dropbox(dropbox_key)
 config_db = dict(
-        drivername="mariadb",
-        username=ini_config.get("database odin", "user"),
-        password=ini_config.get("database odin", "password"),
-        host=ini_config.get("database odin", "host"),
-        port=ini_config.get("database odin", "port"),
-        database=ini_config.get("database odin", "database"),
-    )
+    drivername="mariadb",
+    username=ini_config.get("database odin", "user"),
+    password=ini_config.get("database odin", "password"),
+    host=ini_config.get("database odin", "host"),
+    port=ini_config.get("database odin", "port"),
+    database=ini_config.get("database odin", "database"),
+)
 engine = create_engine(URL.create(**config_db))
-current_folder = Path.cwd().name.upper()
-korting_percent = int(ini_config.get("stap 1 vaste korting", current_folder.lower()).strip("%"))
+scraper_name = Path.cwd().name
+korting_percent = int(ini_config.get("stap 1 vaste korting", scraper_name.lower()).strip("%"))
 
 date_now = datetime.now().strftime("%c").replace(":", "-")
+
 
 def get_info_file():
     with FTP(host=ini_config.get("pieterman ftp", "server")) as ftp:
@@ -46,15 +44,18 @@ def get_info_file():
         # ftp.retrlines('LIST')
         file_name = "csvgi.csv"
 
-        with open("ELK_N_" + date_now + ".csv", "wb") as f:
+        with open(f"{scraper_name}_N_{date_now}.csv", "wb") as f:
             ftp.retrbinary("RETR " + file_name, f.write)
 
 
 get_info_file()
 
-elk_voorraad_info = (
+voorraad_info = (
     pd.read_csv(
-        max(Path.cwd().glob("ELK_N_*.csv"), key=os.path.getctime), sep="^", encoding="ISO-8859-1", dtype={"Artnr": object}
+        max(Path.cwd().glob(f"{scraper_name}_N_*.csv"), key=os.path.getctime),
+        sep="^",
+        encoding="ISO-8859-1",
+        dtype={"Artnr": object},
     )
     .rename(
         columns={
@@ -73,7 +74,7 @@ elk_voorraad_info = (
     .drop_duplicates("sku")
     .assign(
         id=lambda x: x["ShortCde"].fillna(x["OrigNr"]),
-        eigen_sku=lambda x: "ELK" + x["sku"],
+        eigen_sku=lambda x: scraper_name + x["sku"],
         eigenschappen=(
             lambda x: x["eigenschappen"]
             .str.replace(r"\[vrij\] ", "", regex=True)
@@ -88,7 +89,7 @@ elk_voorraad_info = (
         group=lambda x: x["group"].str.split("\\").str[:-1].str.join("::"),
         brand=lambda x: x["brand"].str.title(),
         url_artikel="",
-        stock=lambda x: x["stock"].str.replace("[^0-9]", "", regex=True).fillna('0').astype(int),
+        stock=lambda x: x["stock"].str.replace("[^0-9]", "", regex=True).fillna("0").astype(int),
         lk=lambda x: (korting_percent * x["price"] / 100).round(2),
     )
     .query("stock > 0")
@@ -102,9 +103,9 @@ elk_voorraad_info = (
     )
 )
 
-elk_voorraad_info = elk_voorraad_info[~elk_voorraad_info["group"].str.startswith(("Auto", "Fiets", "::"))]
+voorraad_info = voorraad_info[~voorraad_info["group"].str.startswith(("Auto", "Fiets", "::"))]
 
-elk_voorraad_info_basis = elk_voorraad_info[
+voorraad_info_basis = voorraad_info[
     [
         "sku",
         "ean",
@@ -122,9 +123,9 @@ elk_voorraad_info_basis = elk_voorraad_info[
         "lk",
     ]
 ]
-elk_voorraad_info_basis.to_csv("ELK_P_" + date_now + ".csv", index=False)
+voorraad_info_basis.to_csv(f"{scraper_name}_P_" + date_now + ".csv", index=False)
 
-elk_info = elk_voorraad_info.rename(
+info = voorraad_info.rename(
     columns={
         "price": "prijs",
         "brand": "merk",
@@ -138,25 +139,33 @@ elk_info = elk_voorraad_info.rename(
     }
 )
 
-latest_file = max(Path.cwd().glob("ELK_P_*.csv"), key=os.path.getctime)
+latest_file = max(Path.cwd().glob(f"{scraper_name}_P_*.csv"), key=os.path.getctime)
 with open(latest_file, "rb") as f:
     dbx.files_upload(
-        f.read(), "/macro/datafiles/ELK/" + latest_file.name, mode=dropbox.files.WriteMode("overwrite", None), mute=True
+        f.read(),
+        f"/macro/datafiles/{scraper_name}/" + latest_file.name,
+        mode=dropbox.files.WriteMode("overwrite", None),
+        mute=True,
     )
 
-elk_voorraad_info_basis[['sku', 'price']].rename(columns={'price': 'Inkoopprijs exclusief'}).to_csv("ELK_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig")
+voorraad_info_basis[["sku", "price"]].rename(columns={"price": "Inkoopprijs exclusief"}).to_csv(
+    f"{scraper_name}_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig"
+)
 
-product_info = elk_voorraad_info_basis.rename(
+product_info = voorraad_info_basis.rename(
     columns={
-        "sku":"onze_sku",
+        # "sku":"onze_sku",
         # "ean":"ean",
-        "brand":"merk",
-        "stock":"voorraad",
-        "price":"inkoop_prijs",
+        "brand": "merk",
+        "stock": "voorraad",
+        "price": "inkoop_prijs",
         # :"promo_inkoop_prijs",
         # :"promo_inkoop_actief",
-        "price_advice":"advies_prijs",
-        "info":"omschrijving",
-}).assign(import_date = datetime.now())
+        "price_advice": "advies_prijs",
+        "info": "omschrijving",
+    }
+).assign(onze_sku=lambda x: scraper_name + x["sku"], import_date=datetime.now())
 
 insert_data(engine, product_info)
+
+engine.dispose()
