@@ -125,6 +125,7 @@ product_info = voorraad_info_basis.rename(
         "price": "inkoop_prijs",
         # :"promo_inkoop_prijs",
         # :"promo_inkoop_actief",
+        "group" :"category",
         "price_advice": "advies_prijs",
         "info": "omschrijving",
     }
