@@ -4,33 +4,16 @@ import sys
 from datetime import datetime
 from ftplib import FTP
 from pathlib import Path
-
-import dropbox
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine
-from sqlalchemy.engine.url import URL
 
 sys.path.insert(0, str(Path.cwd().parent))
 from bol_export_file import get_file
-from import_leveranciers.import_data import insert_data, engine
+from process_results.process_data import save_to_db, save_to_dropbox
 
 ini_config = configparser.ConfigParser(interpolation=None)
 ini_config.read(Path.home() / "bol_export_files.ini")
-dropbox_key = os.environ.get("DROPBOX")
-if not dropbox_key:
-    dropbox_key = ini_config.get("dropbox", "api_dropbox")
 
-dbx = dropbox.Dropbox(dropbox_key)
-config_db = dict(
-    drivername="mariadb",
-    username=ini_config.get("database odin", "user"),
-    password=ini_config.get("database odin", "password"),
-    host=ini_config.get("database odin", "host"),
-    port=ini_config.get("database odin", "port"),
-    database=ini_config.get("database odin", "database"),
-)
-engine = create_engine(URL.create(**config_db))
 scraper_name = Path.cwd().name
 korting_percent = int(ini_config.get("stap 1 vaste korting", scraper_name.lower()).strip("%"))
 
@@ -125,28 +108,9 @@ voorraad_info_basis = voorraad_info[
 ]
 voorraad_info_basis.to_csv(f"{scraper_name}_P_" + date_now + ".csv", index=False)
 
-info = voorraad_info.rename(
-    columns={
-        "price": "prijs",
-        "brand": "merk",
-        "group": "category",
-        "info": "product_title",
-        "eigenschappen": "lange_omschrijving",
-        "BestEenh": "verpakings_eenheid",
-        "Afbeelding": "url_plaatje",
-        "stock": "voorraad",
-        "price_advice": "advies_prijs",
-    }
-)
-
 latest_file = max(Path.cwd().glob(f"{scraper_name}_P_*.csv"), key=os.path.getctime)
-with open(latest_file, "rb") as f:
-    dbx.files_upload(
-        f.read(),
-        f"/macro/datafiles/{scraper_name}/" + latest_file.name,
-        mode=dropbox.files.WriteMode("overwrite", None),
-        mute=True,
-    )
+
+save_to_dropbox(latest_file, scraper_name)
 
 voorraad_info_basis[["sku", "price"]].rename(columns={"price": "Inkoopprijs exclusief"}).to_csv(
     f"{scraper_name}_Vendit_price_kaal.csv", index=False, encoding="utf-8-sig"
@@ -166,6 +130,4 @@ product_info = voorraad_info_basis.rename(
     }
 ).assign(onze_sku=lambda x: scraper_name + x["sku"], import_date=datetime.now())
 
-insert_data(engine, product_info)
-
-engine.dispose()
+save_to_db(product_info)
